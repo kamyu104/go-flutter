@@ -221,13 +221,13 @@ func (p *textinputPlugin) updateEditingState() {
 		p.clientID,
 		editingState,
 	}
-	p.channel.InvokeMethod("TextInputClient.updateEditingState", arguments)
+	p.textChannel.InvokeMethod("TextInputClient.updateEditingState", arguments)
 }
 
 // performAction invokes the TextInputClient performAction method in the Flutter
 // Framework.
 func (p *textinputPlugin) performAction(action string) {
-	p.channel.InvokeMethod("TextInputClient.performAction", []interface{}{
+	p.textChannel.InvokeMethod("TextInputClient.performAction", []interface{}{
 		p.clientID,
 		"TextInputAction." + action,
 	})

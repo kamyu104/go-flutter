@@ -10,14 +10,23 @@ import (
 	"github.com/pkg/errors"
 )
 
+// Android KeyEvent constants from https://developer.android.com/reference/android/view/KeyEvent
+const androidMetaStateShift = 1 << 0
+const androidMetaStateAlt = 1 << 1
+const androidMetaStateCtrl = 1 << 12
+const androidMetaStateMeta = 1 << 16
+
 const textinputChannelName = "flutter/textinput"
+const keyEventChannelName = "flutter/keyevent"
 
 // textinputPlugin implements flutter.Plugin and handles method calls to the
 // flutter/platform channel.
 type textinputPlugin struct {
-	messenger plugin.BinaryMessenger
-	window    *glfw.Window
-	channel   *plugin.MethodChannel
+	messenger   plugin.BinaryMessenger
+	window      *glfw.Window
+	textChannel *plugin.MethodChannel
+
+	keyEventChannel *plugin.BasicMessageChannel
 
 	keyboardLayout KeyboardShortcuts
 
@@ -57,10 +66,11 @@ func (p *textinputPlugin) InitPlugin(messenger plugin.BinaryMessenger) error {
 
 func (p *textinputPlugin) InitPluginGLFW(window *glfw.Window) error {
 	p.window = window
-	p.channel = plugin.NewMethodChannel(p.messenger, textinputChannelName, plugin.JSONMethodCodec{})
-	p.channel.HandleFuncSync("TextInput.setClient", p.handleSetClient)
-	p.channel.HandleFuncSync("TextInput.clearClient", p.handleClearClient)
-	p.channel.HandleFuncSync("TextInput.setEditingState", p.handleSetEditingState)
+	p.textChannel = plugin.NewMethodChannel(p.messenger, textinputChannelName, plugin.JSONMethodCodec{})
+	p.keyEventChannel = plugin.NewBasicMessageChannel(p.messenger, keyEventChannelName, plugin.JSONMessageCodec{})
+	p.textChannel.HandleFuncSync("TextInput.setClient", p.handleSetClient)
+	p.textChannel.HandleFuncSync("TextInput.clearClient", p.handleClearClient)
+	p.textChannel.HandleFuncSync("TextInput.setEditingState", p.handleSetEditingState)
 
 	return nil
 }
@@ -190,4 +200,46 @@ func (p *textinputPlugin) glfwKeyCallback(window *glfw.Window, key glfw.Key, sca
 			}
 		}
 	}
+
+	// key events
+
+	// TODO: Stop using the android keymap and translate the glfw keycode to the
+	// platfom native one
+	// BUG: the LogicalKeyboardKey isn't the right one
+	// https://github.com/flutter/flutter/blob/1f2972c7b6a8503f7c6a5dfa180521a6f7efd472/packages/flutter/lib/src/services/raw_keyboard_android.dart#L116
+
+	// MacOS example: flutter/engine/pull/8219
+	// Linux/Windows Watch: google/flutter-desktop-embedding/issues/323
+	var typeKey string
+	if action == glfw.Release {
+		typeKey = "keyup"
+	} else if action == glfw.Press {
+		typeKey = "keydown"
+	} else {
+		fmt.Printf("go-flutter: failed to send key event, action: %v\n", action)
+		return
+	}
+
+	event := struct {
+		KeyCode   int    `json:"keyCode"`
+		Keymap    string `json:"keymap"`
+		Type      string `json:"type"`
+		MetaState int    `json:"metaState"`
+	}{
+		int(key), "android", typeKey,
+		conditionalInt(mods&glfw.ModShift != 0, androidMetaStateShift) |
+			conditionalInt(mods&glfw.ModAlt != 0, androidMetaStateAlt) |
+			conditionalInt(mods&glfw.ModControl != 0, androidMetaStateCtrl) |
+			conditionalInt(mods&glfw.ModSuper != 0, androidMetaStateMeta),
+	}
+	p.keyEventChannel.Send(event)
+
+}
+
+// Int returns val1 if condition, otherwise 0
+func conditionalInt(condition bool, val1 int) int {
+	if condition {
+		return val1
+	}
+	return 0
 }
